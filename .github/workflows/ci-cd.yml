@@ -1,3 +1,5 @@
+# Per-project pipeline. This is the ONLY workflow file you edit for a new project.
+# All logic lives in reusable-s3-static-site.yml.
 name: CI/CD - Hello World React
 
 on:
@@ -8,78 +10,21 @@ on:
   workflow_dispatch: # lets you trigger it manually from the Actions tab
 
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build app
-        run: |
-          echo "🔨 Building the React app..."
-          npm run build
-          echo "✅ Build finished. Output:"
-          ls -la dist
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: react-build
-          path: dist
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: |
-          echo "🧪 Running unit tests..."
-          npm test
-          echo "✅ All tests passed"
-
-  deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: test
-    # only deploy on push to main (not on pull requests)
-    if: github.event_name != 'pull_request'
-    steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: react-build
-          path: dist
-
-      - name: Deploy (simulated)
-        run: |
-          echo "🚀 Starting deployment..."
-          echo "Repository : ${{ github.repository }}"
-          echo "Branch     : ${{ github.ref_name }}"
-          echo "Commit     : ${{ github.sha }}"
-          echo "Triggered by: ${{ github.actor }}"
-          echo "Files that would be deployed:"
-          ls -la dist
-          echo "✅ Deployment successful (simulated - replace this step with a real deploy later)"
+  pipeline:
+    uses: ./.github/workflows/reusable-s3-static-site.yml
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      # --- project settings (change if your app is different) ---
+      app-dir: "."
+      node-version: "20"
+      build-command: npm run build
+      test-command: npm test
+      build-dir: dist
+      # --- deploy only from main, never from pull requests ---
+      deploy: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      # --- AWS settings come from repo variables (Settings -> Secrets and variables -> Actions -> Variables) ---
+      aws-region: ${{ vars.AWS_REGION }}
+      s3-bucket: ${{ vars.S3_BUCKET }}
+      aws-role-arn: ${{ vars.AWS_ROLE_ARN }}

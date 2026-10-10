@@ -1,0 +1,140 @@
+# Reusable template: Build -> Test -> Deploy a static Node app (React/Vite/etc.) to S3.
+# Do not edit per project. Projects call this file and pass their settings via `with:`.
+name: Reusable - S3 Static Site
+
+on:
+  workflow_call:
+    inputs:
+      app-dir:
+        description: Folder that contains package.json ("." = repo root)
+        type: string
+        default: "."
+      node-version:
+        type: string
+        default: "20"
+      build-command:
+        type: string
+        default: npm run build
+      test-command:
+        type: string
+        default: npm test
+      build-dir:
+        description: Build output folder inside app-dir
+        type: string
+        default: dist
+      deploy:
+        description: true = upload to S3 after build + test
+        type: boolean
+        default: false
+      aws-region:
+        type: string
+        default: ""
+      s3-bucket:
+        type: string
+        default: ""
+      aws-role-arn:
+        type: string
+        default: ""
+
+defaults:
+  run:
+    working-directory: ${{ inputs.app-dir }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.app-dir }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: ${{ inputs.build-command }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-build
+          path: ${{ inputs.app-dir }}/${{ inputs.build-dir }}
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.app-dir }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: ${{ inputs.test-command }}
+
+  deploy:
+    name: Deploy to S3
+    runs-on: ubuntu-latest
+    needs: test
+    if: inputs.deploy
+    permissions:
+      id-token: write # OIDC login to AWS, no access keys
+      contents: read
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Check deploy settings
+        env:
+          REGION: ${{ inputs.aws-region }}
+          BUCKET: ${{ inputs.s3-bucket }}
+          ROLE: ${{ inputs.aws-role-arn }}
+        run: |
+          missing=0
+          [ -z "$REGION" ] && echo "::error::AWS_REGION variable is not set" && missing=1
+          [ -z "$BUCKET" ] && echo "::error::S3_BUCKET variable is not set" && missing=1
+          [ -z "$ROLE" ]   && echo "::error::AWS_ROLE_ARN variable is not set" && missing=1
+          [ $missing -eq 0 ] || { echo "Add them in Settings -> Secrets and variables -> Actions -> Variables"; exit 1; }
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: site-build
+          path: dist
+
+      - name: Login to AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Upload files to S3
+        env:
+          BUCKET: ${{ inputs.s3-bucket }}
+          REGION: ${{ inputs.aws-region }}
+        run: |
+          echo "🚀 Deploying ${{ github.sha }} to s3://$BUCKET"
+          # hashed asset files -> cache 1 year
+          aws s3 sync dist "s3://$BUCKET" --delete \
+            --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          # index.html -> never cache, so new deploys show up immediately
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" --cache-control "no-cache"
+          echo "✅ Deployed: http://$BUCKET.s3-website.$REGION.amazonaws.com"
+          echo "### ✅ Deployed to http://$BUCKET.s3-website.$REGION.amazonaws.com" >> "$GITHUB_STEP_SUMMARY"

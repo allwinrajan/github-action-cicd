@@ -75,6 +75,7 @@ ci-cd.yml (settings)  ──calls──►  reusable-s3-static-site.yml
 - Follow `s3-static-site-deploy.md` **steps 12 to 15**
 - Use the **new repo name** in step 12
 - Use the **new bucket name** in step 14
+- After the first push fails at login, fix the trust `sub` (step 13)
 - Skip step 11 (GitHub provider already exists in your AWS account)
 
 # 4. Add the 3 variables in the new repo
@@ -129,7 +130,7 @@ git push origin main
 - One **role per repo**: never reuse a role across repos
 - One **bucket per site**
 - Never add AWS access keys to GitHub Secrets. OIDC replaces them
-- Trust policy must name the exact repo + `main` (no `*`)
+- Trust policy `sub` must be the exact value from **Debug OIDC claims** (includes `@IDs`, no `*`)
 - Don't edit the reusable file per project. If you improve it, every project gets the change
 
 ---
@@ -137,7 +138,7 @@ git push origin main
 # Troubleshooting
 - **Deploy job skipped**: you are on a PR or not on `main`. That is expected
 - **"S3_BUCKET variable is not set"**: add the variables (checklist step 4)
-- **Not authorized to perform sts:AssumeRoleWithWebIdentity**: role trust has the wrong repo name (checklist step 3)
+- **Not authorized to perform sts:AssumeRoleWithWebIdentity**: open the failed run → **Debug OIDC claims** → copy `sub` into the role trust policy (`s3-static-site-deploy.md` step 13)
 - **AccessDenied on upload**: role policy has the wrong bucket name
 - **npm ci fails: no package-lock.json**: wrong `app-dir`, or run `npm install` once locally and commit `package-lock.json`
 - **Deploy uploads nothing / 404**: wrong `build-dir` (`dist` vs `build`)

@@ -136,15 +136,37 @@ npm run build
 - Role name: `github-actions-s3-deploy`
 - Click **Create role**
 
-# 13. Check the trust policy
-- Roles → click `github-actions-s3-deploy`
-- **Trust relationships** tab
-- Must contain:
+# 13. Fix the trust policy (IMPORTANT)
+GitHub now sends the `sub` with owner ID + repo ID, so the wizard's value does not match.
+
+- First push will fail at **Login to AWS (OIDC)**, which is expected
+- Open the failed run → **Debug OIDC claims (on login failure)** → copy the `sub` value
+  - Looks like `repo:allwinrajan@163723809/github-action-cicd@1412116653:ref:refs/heads/main`
+- IAM → Roles → `github-actions-s3-deploy` → **Trust relationships** → **Edit trust policy**
+- Paste (change account ID + `sub`):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::152924643789:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:allwinrajan@163723809/github-action-cicd@1412116653:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
 ```
-"token.actions.githubusercontent.com:sub": "repo:allwinrajan/github-action-cicd:ref:refs/heads/main"
-```
-- If it shows `*` anywhere in that line, click **Edit trust policy** and fix it to match above
-- This line means **only main branch of this repo** can use the role
+- Click **Update policy** → GitHub → **Re-run all jobs**
+- No `*` anywhere. This means **only main branch of this exact repo** can use the role
+- The IDs also block a deleted-and-recreated repo with the same name
 
 # 14. Give role access to this bucket only
 - Same role → **Permissions** tab
@@ -250,7 +272,7 @@ git push origin main
 # Troubleshooting
 - **403 Forbidden** on website: check step 3 (last 2 boxes unchecked) and step 7 (bucket policy)
 - **404 Not Found**: files were uploaded inside a `dist/` folder. Upload the contents of `dist`, not the folder
-- **Not authorized to perform sts:AssumeRoleWithWebIdentity**: repo/branch in step 13 is wrong, or you ran it from a branch that is not main
+- **Not authorized to perform sts:AssumeRoleWithWebIdentity**: trust policy `sub` doesn't match. Copy `sub` from the **Debug OIDC claims** step into step 13
 - **Could not load credentials**: `AWS_ROLE_ARN` variable missing or misspelled (step 16)
 - **AccessDenied** during upload: bucket name in step 14 doesn't match the `S3_BUCKET` variable
 - **Old page still showing**: Ctrl + F5
